@@ -1,116 +1,89 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, CallbackContext, ConversationHandler
+from telethon import TelegramClient, events
+import os
+import asyncio
+import traceback
 
-# Define conversation states
-MOVIE_INPUT, VERIFIED = range(2)
+# API credentials for source chat
+source_api_id = 26697231  # Replace with your first API ID
+source_api_hash = '35f2769c773534c6ebf24c9d0731703a'  # Replace with your first API Hash
+source_chat_id = -4564401074  # Replace with the chat ID to listen to
 
-# Function to start the bot and send the first message
-async def start(update: Update, context: CallbackContext) -> int:
-    user_first_name = update.message.from_user.first_name  # Get the user's first name
-    image_url = "https://static.vecteezy.com/system/resources/previews/000/240/724/original/popcorn-machine-vector.jpg"  # URL of the popcorn machine image
+# API credentials for destination account
+destination_api_id = 14135677  # Replace with your second API ID
+destination_api_hash = 'edbecdc187df07fddb10bcff89964a8e'  # Replace with your second API Hash
+destination_bot_username = '@gpt3_unlim_chatbot'  # Replace with the bot's username
 
-    # Send the specified text first
-    await update.message.reply_text(
-        "❗️Just Send Movie Name And Year Correctly.\n\n"
-        "➠ Other BOTs : @iPapkornFbot"
-    )
+# Paths for session files
+source_session_file = "new10_source_session.session"
+destination_session_file = "new10_destination_session.session"
 
-    # Construct the caption for the image with a clickable "Google"
-    caption = (
-        f"Hey 👋 {user_first_name} 🤩\n\n"
-        "🍿 Wᴇʟᴄᴏᴍᴇ Tᴏ Tʜᴇ Wᴏʀʟᴅ's Cᴏᴏʟᴇsᴛ Sᴇᴀʀᴄʜ Eɴɢɪɴᴇ!\n\n"
-        "Here You Can Request Movie's, Just Send Movie OR WebSeries Name With Proper [Google](https://www.google.com/) Spelling..!!"
-    )
+# Ensure session files are present
+if not os.path.exists(source_session_file):
+    print("Source session file not found. Creating a new session...")
+if not os.path.exists(destination_session_file):
+    print("Destination session file not found. Creating a new session...")
 
-    # Send photo with caption
-    await update.message.reply_photo(
-        photo=image_url,
-        caption=caption,
-        parse_mode='Markdown'  # Enable Markdown for clickable link
-    )
-    return MOVIE_INPUT
+# Initialize Telegram clients
+source_client = TelegramClient(source_session_file, source_api_id, source_api_hash)
+destination_client = TelegramClient(destination_session_file, destination_api_id, destination_api_hash)
 
-# Function to handle the user's movie name and year input (2nd message)
-async def handle_movie(update: Update, context: CallbackContext) -> int:
-    # Create inline keyboard buttons for "Join" and "Verify"
-    keyboard = [
-        [
-            InlineKeyboardButton("Join💥", url="https://t.me/major/start?startapp=1607381212"),
-            InlineKeyboardButton("Verify✅", callback_data='verify✅'),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+# Function to handle disconnections and reconnections
+async def handle_disconnection():
+    while True:
+        try:
+            await source_client.run_until_disconnected()
+        except Exception as e:
+            print(f"Error: {e}. Reconnecting...")
+            await asyncio.sleep(5)  # Wait before attempting to reconnect
+            await source_client.start()  # Restart the client
 
-    await update.message.reply_text("Plz First Join The Group And Verify it To Continue 🕵️", reply_markup=reply_markup)
-    return VERIFIED
+# Event handler for messages in the source chat
+@source_client.on(events.NewMessage(chats=source_chat_id))
+async def forward_message(event):
+    # Extract the original message
+    source_id_message = event.raw_text
 
-# Function to handle button clicks (3rd message)
-async def button(update: Update, context: CallbackContext) -> int:
-    query = update.callback_query
-    await query.answer()
+    # Custom message format with highlighted source message
+    custom_message = f"""
+"{source_id_message}"
+ 
+ If the quoted text within double quotation mark is not a trading signal, respond with "Processing your question....". If it is a trading signal, extract the necessary information and fill out the form below. The symbol should be paired with USDT. Use the highest entry price. The stop loss price will be taken from inside the double quotation mark and if it is not given then calculate it as 0.5% below the entry price. Use the lowest take profit price given inside the double quoted message and if none is provided then calculate take profit price as 2% above the entry price.Provide only the completed form, no other text.[Remember inside the double quotation mark 'cmp'= current market price, 'sl'= stop loss, 'tp'=take profit]
 
-    if query.data == 'verify✅':
-        # Once "Verify✅" is clicked, the bot sends the 3rd message and removes the buttons
-        await query.edit_message_text(text="😍Great Now You Are All Set, Just Send The Movie Name And Year Correctly 🤗")
-    return VERIFIED
 
-# Function to handle user's input after clicking "Verify✅" (4th and 5th messages)
-async def handle_after_verify(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("❗Due To Heavy Load We Have Now Upgraded Our Bot to Response More Efficiently 😊")
-    await update.message.reply_text("Just Send Your Movie Name In Our New Upgraded Bot 💪 @iPapkornFbot")
+Symbol:
+Price:
+Stop Loss:
+Take Profit:
+Take Profit:
+"""
 
-    # Now, any subsequent message will lead to the bot repeatedly sending the 5th message
-    return VERIFIED
+    # Send the formatted message to the bot
+    async with destination_client:
+        try:
+            await destination_client.send_message(destination_bot_username, custom_message)
+            print("Custom message forwarded to destination bot.")
+        except Exception as e:
+            print(f"Error while forwarding the message: {e}")
 
-# Function to send bot 5th message in reply to every next message after bot 4th and 5th
-async def repeat_message(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("Just Send Your Movie Name In Our New Upgraded Bot 💪 @iPapkornFbot")
-    return VERIFIED
+# Main function to start both clients
+async def main():
+    print("Starting both clients...")
+    # Start both clients
+    await source_client.start()
+    await destination_client.start()
+    print("Bot is running... Waiting for messages...")
+    await handle_disconnection()  # Handle reconnections
 
-# Function to handle /help command
-async def help_command(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text(
-        "We're excited to inform you that we've upgraded our bot to better serve your needs. "
-        "To ensure a smoother and more efficient experience, we invite you to join us at our new bot, @iPapkornFbot.\n\n"
-        "Thank you for your continued support🫶\n\n"
-        "Best regards,\n"
-        "iPapKornBot"
-    )
+# Entry point - running within the existing event loop
+if __name__ == "__main__":
+    async def run_bot():
+        while True:  # Loop to restart the script on error
+            try:
+                # Run the main function within the existing event loop
+                await main()
+            except Exception as e:
+                print(f"Error occurred: {e}. Restarting the script...")
+                await asyncio.sleep(5)  # Optional sleep to prevent rapid restarts
 
-# Function to handle /feedback command
-async def feedback_command(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text(
-        "Please Let Us Know How Was Your Experience By Sending Your Feedback In Our Main Channel @iPapkornFbot 🤧"
-    )
-
-def main() -> None:
-    # Replace with your actual bot token
-    application = Application.builder().token("7602665717:AAGf3kgqzkaNkyQsexOkkBgmFSPG2IvxpRk").build()
-
-    # Define the conversation handler with states
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            MOVIE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_movie)],
-            VERIFIED: [
-                CallbackQueryHandler(button, pattern='verify✅'),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_after_verify),
-            ],
-        },
-        fallbacks=[
-            CommandHandler("start", start),  # Restart conversation when /start is received
-            CommandHandler("help", help_command),
-            CommandHandler("feedback", feedback_command),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, repeat_message)
-        ],
-    )
-
-    # Add the conversation handler to the application
-    application.add_handler(conv_handler)
-
-    # Start the bot
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
-hu'g'
+    # Start the event loop to run the bot
+    asyncio.run(run_bot())
